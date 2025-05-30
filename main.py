@@ -7,7 +7,7 @@ import traceback
 
 app = Flask(__name__)
 
-# === API KEYS (set in Replit Secrets) ===
+# === API KEYS (set in Replit or Render secrets) ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
@@ -19,12 +19,12 @@ ADMIN_EMAILS = [
 ]
 
 # === Verified From Email in SendGrid ===
-FROM_EMAIL = "support@titlefrauddefender.com"  # SendGrid-verified sender
+FROM_EMAIL = "support@titlefrauddefender.com"  # Must be SendGrid-verified
 
 # === Toggle sending directly to customer ===
 SEND_TO_CUSTOMER = False
 
-# === Initialize OpenAI client (v1.x) ===
+# === Initialize OpenAI client ===
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 @app.route('/', methods=['GET'])
@@ -40,13 +40,12 @@ def webhook():
         message_body = data.get("message", {}).get("body")
         contact_email = data.get("email")
         contact_name = data.get("full_name") or f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
-        first_name = data.get("first_name", "there")
 
         if not message_body or not contact_email:
             return jsonify({"error": "Missing message body or contact email"}), 400
 
-        # Generate AI response
-        ai_response = generate_ai_reply(message_body, first_name)
+        # Generate AI response with natural greeting
+        ai_response = generate_ai_reply(message_body, contact_name)
 
         # Build email content
         full_reply = f"""
@@ -76,25 +75,18 @@ Message:
         return jsonify({"error": error_msg}), 500
 
 
-def generate_ai_reply(user_msg, first_name):
+def generate_ai_reply(user_msg, contact_name):
     prompt = f"""
-You are a professional assistant for Title Fraud Defender.
+You are a helpful assistant for Title Fraud Defender.
 
-Title Fraud Defender monitors property title records, alerts homeowners to suspicious changes, and protects them from title fraud.
+Your job is to respond professionally and clearly to customer inquiries about title fraud protection services.
 
-Write a professional, clear response to the following message. 
-Start with: "Hi [FirstName],"
-End with a warm, confident closing and include:
+Always begin your response with a personalized greeting using the customer's first name ("Hi [FirstName],") followed by a helpful and professional answer.
 
-"If you have any other questions, feel free to reach out. We're here to help!"
-And sign off with:
-"Best regards,
-The Title Fraud Defender Team"
+The service you support, Title Fraud Defender, monitors property title records, alerts homeowners to suspicious activity, and gives peace of mind through early detection of title fraud.
 
-Message:
-\"\"\"
-{user_msg}
-\"\"\"
+Customer name: {contact_name}
+Customer message: {user_msg}
 """
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
@@ -103,11 +95,9 @@ Message:
             {"role": "user", "content": prompt}
         ],
         temperature=0.7,
-        max_tokens=400
+        max_tokens=300
     )
-
-    ai_text = response.choices[0].message.content.strip()
-    return f"Hi {first_name},\n\n{ai_text}"
+    return response.choices[0].message.content.strip()
 
 
 def send_emails(recipients, subject, content):
