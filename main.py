@@ -1,78 +1,127 @@
 from flask import Flask, request, jsonify
-import openai
 import os
-import requests
+from openai import OpenAI
+import sendgrid
+from sendgrid.helpers.mail import Mail
+import traceback
 
 app = Flask(__name__)
 
-# Load your API keys from environment variables
-openai.api_key = os.getenv('OPENAI_API_KEY')
-GHL_API_KEY = os.getenv('GHL_API_KEY')
-GHL_BASE_URL = 'https://rest.gohighlevel.com/v1'
+# === API KEYS (set in Replit Secrets) ===
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
-# Set this to your email for testing AI replies
-FORWARD_TO_EMAIL = ["roy.flores0226@gmail.com", "rsptaurus21@gmail.com", "georgemccleary@gmail.com", "jai.labesores@gmail.com"]  # 👈 Replace with your testing email
+# === Admin QA Email Recipients ===
+ADMIN_EMAILS = [
+    "roy.flores0226@gmail.com",
+    "rsptaurus21@gmail.com",
+    "georgemccleary@gmail.com"
+]
 
-# Function to generate reply from ChatGPT
-def generate_ai_response(email_body):
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f"Reply professionally to this email: {email_body}"}
-        ]
-    )
-    return response['choices'][0]['message']['content']
+# === Verified From Email in SendGrid ===
+FROM_EMAIL = "support@titlefrauddefender.com"  # SendGrid-verified sender
 
-# Health check endpoint
-@app.route("/", methods=["GET"])
-def home():
-    return "GHL ChatGPT Auto-Responder is running!"
+# === Toggle sending directly to customer ===
+SEND_TO_CUSTOMER = False
 
-# Webhook endpoint triggered by GHL
-@app.route("/webhook", methods=["POST"])
+# === Initialize OpenAI client (v1.x) ===
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+@app.route('/', methods=['GET'])
+def health_check():
+    return "✅ Webhook Flask API is running. Use POST /webhook to receive data."
+
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.json
-    print("Webhook data received:", data)
-
-    email_body = data.get('body', '')
-    contact_info = data.get('contact', {})
-    contact_name = contact_info.get('name', 'Unknown Contact')
-    original_sender_email = contact_info.get('email', 'unknown@example.com')
-
-    if not email_body:
-        return jsonify({'error': 'Missing email body'}), 400
-
     try:
-        ai_reply = generate_ai_response(email_body)
+        data = request.get_json() or {}
+        print("RAW PAYLOAD RECEIVED FROM GHL:", data)
 
-        headers = {
-            "Authorization": f"Bearer {GHL_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        message_body = data.get("message", {}).get("body")
+        contact_email = data.get("email")
+        contact_name = data.get("full_name") or f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
+        first_name = data.get("first_name", "there")
 
-        # Construct detailed body with sender info
-        full_message = f"""
-Original Sender: {contact_name} <{original_sender_email}>
+        if not message_body or not contact_email:
+            return jsonify({"error": "Missing message body or contact email"}), 400
 
---- Original Message ---
-{email_body}
+        # Generate AI response
+        ai_response = generate_ai_reply(message_body, first_name)
 
---- AI Suggested Reply ---
-{ai_reply}
+        # Build email content
+        full_reply = f"""
+=== AI Generated Reply ===
+
+{ai_response}
+
+--- Original Message Info ---
+Name: {contact_name}
+Email: {contact_email}
+Message:
+{message_body}
 """
 
-        email_payload = {
-            "toAddress": FORWARD_TO_EMAIL,
-            "subject": f"AI Reply for: {contact_name} ({original_sender_email})",
-            "body": full_message.strip()
-        }
+        # Choose recipients
+        recipients = [contact_email] if SEND_TO_CUSTOMER else ADMIN_EMAILS
+        send_emails(recipients, f"[GHL Reply] AI Response for {contact_name}", full_reply)
 
-        response = requests.post(f"{GHL_BASE_URL}/emails/send", headers=headers, json=email_payload)
-        return jsonify({"status": "sent to fixed address", "ghl_response": response.json()}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "status": "Reply processed",
+            "sent_to": recipients
+        }), 200
 
-# Run the Flask app
+    except Exception:
+        error_msg = traceback.format_exc()
+        print("Exception occurred:\n", error_msg)
+        return jsonify({"error": error_msg}), 500
+
+
+def generate_ai_reply(user_msg, first_name):
+    prompt = f"""
+You are a professional assistant for Title Fraud Defender.
+
+Title Fraud Defender monitors property title records, alerts homeowners to suspicious changes, and protects them from title fraud.
+
+Write a professional, clear response to the following message. 
+Start with: "Hi [FirstName],"
+End with a warm, confident closing and include:
+
+"If you have any other questions, feel free to reach out. We're here to help!"
+And sign off with:
+"Best regards,
+The Title Fraud Defender Team"
+
+Message:
+\"\"\"
+{user_msg}
+\"\"\"
+"""
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant for Title Fraud Defender."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7,
+        max_tokens=400
+    )
+
+    ai_text = response.choices[0].message.content.strip()
+    return f"Hi {first_name},\n\n{ai_text}"
+
+
+def send_emails(recipients, subject, content):
+    sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
+    for email in recipients:
+        mail = Mail(
+            from_email=FROM_EMAIL,
+            to_emails=email,
+            subject=subject,
+            plain_text_content=content
+        )
+        resp = sg.send(mail)
+        print(f"Email sent to {email}: {resp.status_code}")
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000)
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
