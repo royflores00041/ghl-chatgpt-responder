@@ -19,9 +19,9 @@ ADMIN_EMAILS = [
 ]
 
 # === Verified From Email in SendGrid ===
-FROM_EMAIL = "support@titlefrauddefender.com"  # SendGrid-verified sender
+FROM_EMAIL = "support@titlefrauddefender.com"
 
-# === Toggle sending directly to customer ===
+# === Toggle: Set to True to send replies to customers ===
 SEND_TO_CUSTOMER = True
 
 # === Initialize OpenAI client ===
@@ -48,8 +48,13 @@ def webhook():
         # Generate AI response
         ai_response = generate_ai_reply(message_body, first_name_only)
 
-        # Build email content
-        full_reply = f"""
+        # === Choose email content based on toggle ===
+        if SEND_TO_CUSTOMER:
+            # Plain reply for customers
+            email_body = ai_response
+        else:
+            # Detailed format for internal QA
+            email_body = f"""
 === AI Generated Reply ===
 
 {ai_response}
@@ -61,10 +66,10 @@ Message:
 {message_body}
 """
 
-        # Choose recipients
+        # Choose recipients and subject
         recipients = [contact_email] if SEND_TO_CUSTOMER else ADMIN_EMAILS
         subject = f"Title Fraud Defender Response for {first_name_only}"
-        send_emails(recipients, subject, full_reply)
+        send_emails(recipients, subject, email_body)
 
         return jsonify({
             "status": "Reply processed",
