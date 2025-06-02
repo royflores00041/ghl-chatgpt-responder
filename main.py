@@ -7,7 +7,7 @@ import traceback
 
 app = Flask(__name__)
 
-# === API KEYS (set in Replit or Render secrets) ===
+# === API KEYS (set in Replit Secrets or your environment) ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 
@@ -19,7 +19,7 @@ ADMIN_EMAILS = [
 ]
 
 # === Verified From Email in SendGrid ===
-FROM_EMAIL = "support@titlefrauddefender.com"  # Must be SendGrid-verified
+FROM_EMAIL = "support@titlefrauddefender.com"  # SendGrid-verified sender
 
 # === Toggle sending directly to customer ===
 SEND_TO_CUSTOMER = False
@@ -40,12 +40,13 @@ def webhook():
         message_body = data.get("message", {}).get("body")
         contact_email = data.get("email")
         contact_name = data.get("full_name") or f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
+        first_name_only = contact_name.split()[0] if contact_name else "there"
 
         if not message_body or not contact_email:
             return jsonify({"error": "Missing message body or contact email"}), 400
 
-        # Generate AI response with natural greeting
-        ai_response = generate_ai_reply(message_body, contact_name)
+        # Generate AI response
+        ai_response = generate_ai_reply(message_body, first_name_only)
 
         # Build email content
         full_reply = f"""
@@ -62,7 +63,8 @@ Message:
 
         # Choose recipients
         recipients = [contact_email] if SEND_TO_CUSTOMER else ADMIN_EMAILS
-        send_emails(recipients, f"[GHL Reply] AI Response for {contact_name}", full_reply)
+        subject = f"Title Fraud Defender Response for {first_name_only}"
+        send_emails(recipients, subject, full_reply)
 
         return jsonify({
             "status": "Reply processed",
@@ -75,17 +77,20 @@ Message:
         return jsonify({"error": error_msg}), 500
 
 
-def generate_ai_reply(user_msg, contact_name):
+def generate_ai_reply(user_msg, first_name):
     prompt = f"""
 You are a helpful assistant for Title Fraud Defender.
 
 Your job is to respond professionally and clearly to customer inquiries about title fraud protection services.
 
-Always begin your response with a personalized greeting using the customer's first name ("Hi [FirstName],") followed by a helpful and professional answer.
+Always begin your response with a personalized greeting using the customer's first name ("Hi {first_name},"), followed by a helpful and professional answer.
+
+Make sure to end the message with:
+"Best regards,
+Title Fraud Defender Support"
 
 The service you support, Title Fraud Defender, monitors property title records, alerts homeowners to suspicious activity, and gives peace of mind through early detection of title fraud.
 
-Customer name: {contact_name}
 Customer message: {user_msg}
 """
     response = client.chat.completions.create(
@@ -111,6 +116,7 @@ def send_emails(recipients, subject, content):
         )
         resp = sg.send(mail)
         print(f"Email sent to {email}: {resp.status_code}")
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
