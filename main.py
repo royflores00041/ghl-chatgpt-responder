@@ -22,7 +22,7 @@ ADMIN_EMAILS = [
 FROM_EMAIL = "support@titlefrauddefender.com"
 
 # === Toggle: Set to True to send replies to customers ===
-SEND_TO_CUSTOMER = True
+SEND_TO_CUSTOMER = False
 
 # === Initialize OpenAI client ===
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -50,7 +50,7 @@ def webhook():
 
         # === Choose email content based on toggle ===
         if SEND_TO_CUSTOMER:
-            # Plain reply for customers
+            # Plain reply for customers with signature included
             email_body = ai_response
         else:
             # Detailed format for internal QA
@@ -88,15 +88,19 @@ You are a helpful assistant for Title Fraud Defender.
 
 Your job is to respond professionally and clearly to customer inquiries about title fraud protection services.
 
-Always begin your response with a personalized greeting using the customer's first name ("Hi {first_name},"), followed by a helpful and professional answer.
+Always:
+- Begin your response with a personalized greeting using the customer's first name (e.g., "Hi {first_name},")
+- End the message with the following exact signature (always, without exception):
 
-Make sure to end the message with:
-"Best regards,
-Title Fraud Defender Support"
+Best regards,
+Title Fraud Defender Support
 
-The service you support, Title Fraud Defender, monitors property title records, alerts homeowners to suspicious activity, and gives peace of mind through early detection of title fraud.
+Important: Do not leave a blank or request someone else to sign. You, the assistant, must always close with the exact signature above.
 
-Customer message: {user_msg}
+Background: Title Fraud Defender monitors property title records, alerts homeowners to suspicious activity, and gives peace of mind through early detection of title fraud.
+
+Customer message:
+{user_msg}
 """
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
