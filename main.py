@@ -22,7 +22,7 @@ ADMIN_EMAILS = [
 FROM_EMAIL = "support@titlefrauddefender.com"  # SendGrid-verified sender
 
 # === Toggle sending directly to customer ===
-SEND_TO_CUSTOMER = False
+SEND_TO_CUSTOMER = True
 
 # === Initialize OpenAI client ===
 client = OpenAI(api_key=OPENAI_API_KEY)
